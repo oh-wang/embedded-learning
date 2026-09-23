@@ -3,11 +3,11 @@
 # 改这里就行，不用动 sync.sh
 # ============================================================
 
-# 公开仓库：学习路线 + 每日发布内容（posts/）
+# 公开博客仓库：学习路线 + 每日发布内容（posts/）
 PUBLIC_REPO="oh-wang/embedded-learning"
 
-# 私有仓库：完整记忆备份（progress / log / mistakes / roadmap）
-MEMORY_REPO="oh-wang/embedded-learning-memory"
+# 私有全量备份仓库：学习目录中的所有文件（包括 memory/）
+BACKUP_REPO="oh-wang/embedded-learning-memory"
 
 # 公开仓库里那个「进度流水」Issue 的标题
 ISSUE_TITLE="嵌入式学习进度"

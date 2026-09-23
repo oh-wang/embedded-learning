@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# 嵌入式学习 · 一键同步
+# 嵌入式学习 · 一键同步（私有全量备份 + 公开博客发布）
 #   用法：
 #     sync.sh                 同步今天的进度（需先写好当天文件）
 #     sync.sh --init          首次初始化：建仓库 + 首次推送
@@ -100,7 +100,7 @@ show_status() {
   printf '%-16s %s\n' "今日记忆"    "$( [ -f "$LOG_FILE" ]  && echo "已写" || echo "未写" )"
   printf '%-16s %s\n' "今日发布稿"  "$( [ -f "$POST_FILE" ] && echo "已写" || echo "未写" )"
   printf '%-16s %s\n' "公开仓库"    "$PUBLIC_REPO"
-  printf '%-16s %s\n' "记忆仓库"    "$MEMORY_REPO"
+  printf '%-16s %s\n' "私有备份仓库"  "$BACKUP_REPO"
   printf '%-16s %s\n' "git"         "$GIT"
   printf '%-16s %s\n' "gh"          "$(have_gh && echo 已安装 || echo 未安装)"
   hr
@@ -165,22 +165,28 @@ push_public() {
   fi
 }
 
-# ---------- 3. 记忆仓库镜像 ----------
-mirror_memory() {
-  step "3/5  同步记忆到备份仓库"
+# ---------- 3. 私有全量备份镜像 ----------
+mirror_backup() {
+  step "3/5  同步整个学习目录到私有备份仓库"
   if [ ! -d "$MIRROR/.git" ]; then
     if [ "$DRY_RUN" = true ]; then
-      c_dim "（dry-run）会克隆 $MEMORY_REPO 到 .memory-repo/"; return 0
+      c_dim "（dry-run）会克隆 $BACKUP_REPO 到 .memory-repo/"; return 0
     fi
-    c_dim "克隆 $MEMORY_REPO ..."
-    gitc clone -q "https://github.com/${MEMORY_REPO}.git" "$MIRROR" \
+    c_dim "克隆 $BACKUP_REPO ..."
+    gitc clone -q "https://github.com/${BACKUP_REPO}.git" "$MIRROR" \
       || die "克隆失败。先执行： bash scripts/sync.sh --init"
   fi
-  # 镜像：清掉旧内容（保留 .git 与 README），再拷入最新 memory/
+  # 镜像整个学习目录，保留备份仓库自己的 .git；不复制公开仓库的工作元数据。
   find "$MIRROR" -mindepth 1 -maxdepth 1 \
-    ! -name '.git' ! -name 'README.md' -exec rm -rf {} +
-  cp -R "$MEM_DIR/." "$MIRROR/"
-  ok "记忆文件已镜像到 .memory-repo/"
+    ! -name '.git' -exec rm -rf {} +
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --delete --exclude '.git/' --exclude '.memory-repo/' "$ROOT/" "$MIRROR/"
+  else
+    # macOS 通常自带 rsync；没有时逐项复制，避免把 .memory-repo 递归复制进自身。
+    find "$ROOT" -mindepth 1 -maxdepth 1 \
+      ! -name '.git' ! -name '.memory-repo' -exec cp -R {} "$MIRROR/" \;
+  fi
+  ok "整个学习目录已镜像到 .memory-repo/（含 memory/、posts/、脚本和模板）"
 }
 
 push_memory() {
@@ -196,7 +202,7 @@ push_memory() {
     ok "已提交：记忆备份 ${DATE}"
   fi
   if [ "$NO_PUSH" = true ]; then c_dim "（no-push 跳过推送）"; cd "$ROOT"; return 0; fi
-  gitc push -q origin "$MEMORY_BRANCH" && ok "备份仓库已更新"
+    gitc push -q origin "$MEMORY_BRANCH" && ok "私有备份仓库已更新"
   cd "$ROOT"
 }
 
@@ -230,20 +236,20 @@ do_init() {
   step "初始化：创建仓库并首次推送"
   have_gh || die "需要 gh 且已登录： gh auth login"
 
-  for spec in "$PUBLIC_REPO:public" "$MEMORY_REPO:private"; do
+  for spec in "$PUBLIC_REPO:public" "$BACKUP_REPO:private"; do
     local repo="${spec%:*}" vis="${spec#*:}"
     if gh repo view "$repo" >/dev/null 2>&1; then
       c_dim "已存在：$repo"
     else
       c_dim "创建 $vis 仓库：$repo"
       gh repo create "$repo" "--$vis" \
-        --description "$( [ "$vis" = public ] && echo "嵌入式学习｜路线与每日进度" || echo "嵌入式学习记忆备份（私有）" )" >/dev/null
+        --description "$( [ "$vis" = public ] && echo "嵌入式学习博客｜路线与每日进度" || echo "嵌入式学习全量备份（私有）" )" >/dev/null
       ok "已创建 $repo"
     fi
   done
 
   if [ ! -d "$MIRROR/.git" ]; then
-    gitc clone -q "https://github.com/${MEMORY_REPO}.git" "$MIRROR" 2>/dev/null || true
+    gitc clone -q "https://github.com/${BACKUP_REPO}.git" "$MIRROR" 2>/dev/null || true
   fi
 
   if [ ! -d "$ROOT/.git" ]; then gitc init -q -b "$PUBLIC_BRANCH" 2>/dev/null || gitc init -q; fi
@@ -258,7 +264,7 @@ do_init() {
   gitc diff --cached --quiet 2>/dev/null || gitc commit -q -m "chore: 初始化学习仓库"
   gitc push -q -u origin "$PUBLIC_BRANCH" && ok "公开仓库首次推送完成"
 
-  mirror_memory
+  mirror_backup
   cd "$MIRROR"
   gitc add -A
   gitc diff --cached --quiet 2>/dev/null || gitc commit -q -m "chore: 初始化记忆备份"
@@ -267,7 +273,7 @@ do_init() {
   hr
   ok "初始化完成："
   c_dim "  公开： https://github.com/$PUBLIC_REPO"
-  c_dim "  备份： https://github.com/$MEMORY_REPO"
+  c_dim "  私有备份： https://github.com/$BACKUP_REPO"
 }
 
 # ---------- 主线 ----------
@@ -279,7 +285,7 @@ case "$MODE" in
     preflight || exit 1
     update_progress
     push_public
-    mirror_memory
+    mirror_backup
     push_memory
     update_issue
     hr
